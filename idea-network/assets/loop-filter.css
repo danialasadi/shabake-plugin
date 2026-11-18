@@ -1,0 +1,129 @@
+/**
+ * Loop Grid filter widget styles.
+ *
+ * @package excel-importer
+ */
+
+.shabake-loop-filter {
+	display: block;
+	margin: 0 0 24px;
+}
+
+.shabake-loop-filter__inner {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: stretch;
+	gap: 12px;
+	padding: 10px;
+	background-color: #ffffff;
+	border-radius: 16px;
+	box-shadow: 0 8px 26px rgba(15, 23, 42, 0.08);
+}
+
+.shabake-loop-filter__field {
+	position: relative;
+	display: flex;
+	align-items: center;
+	flex: 1 1 160px;
+	min-width: 0;
+}
+
+.shabake-loop-filter__field--search {
+	flex: 2 1 260px;
+}
+
+.shabake-loop-filter__control {
+	width: 100%;
+	min-height: 44px;
+	padding: 0 14px;
+	border: 1px solid #dbe3ec;
+	border-radius: 12px;
+	background-color: #fbfcfe;
+	color: #334155;
+	font-size: 14px;
+	line-height: 1.6;
+	box-sizing: border-box;
+	appearance: none;
+	-webkit-appearance: none;
+	transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.shabake-loop-filter__control:hover {
+	border-color: #c7d2e0;
+}
+
+.shabake-loop-filter__control:focus {
+	outline: none;
+	border-color: #84cc16;
+	box-shadow: 0 0 0 3px rgba(132, 204, 22, 0.16);
+}
+
+select.shabake-loop-filter__control {
+	padding-left: 34px;
+	padding-right: 14px;
+	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+	background-repeat: no-repeat;
+	background-position: left 12px center;
+	background-size: 16px 16px;
+	cursor: pointer;
+}
+
+.shabake-loop-filter__field--search .shabake-loop-filter__icon {
+	position: absolute;
+	left: 12px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	color: #94a3b8;
+	pointer-events: none;
+}
+
+.shabake-loop-filter__field--search .shabake-loop-filter__control {
+	padding-left: 40px;
+}
+
+.shabake-loop-filter__control::placeholder {
+	color: #94a3b8;
+	opacity: 1;
+}
+
+.shabake-loop-filter__submit {
+	flex: 0 0 auto;
+	min-height: 44px;
+	padding: 0 22px;
+	border: 0;
+	border-radius: 12px;
+	background-color: #2b7a78;
+	color: #ffffff;
+	font-size: 14px;
+	font-weight: 600;
+	cursor: pointer;
+	transition: background-color 0.15s ease, opacity 0.15s ease;
+}
+
+.shabake-loop-filter__submit:hover,
+.shabake-loop-filter__submit:focus {
+	background-color: #236461;
+	color: #ffffff;
+}
+
+.shabake-loop-filter__submit:focus {
+	outline: 2px solid #84cc16;
+	outline-offset: 2px;
+}
+
+@media (max-width: 767px) {
+	.shabake-loop-filter__inner {
+		padding: 8px;
+		gap: 8px;
+	}
+
+	.shabake-loop-filter__field,
+	.shabake-loop-filter__field--search {
+		flex: 1 1 100%;
+	}
+
+	.shabake-loop-filter__submit {
+		width: 100%;
+	}
+}

@@ -32,6 +32,20 @@ class Idea_Network_CPT {
 	const TAXONOMY = 'idea_category';
 
 	/**
+	 * Province taxonomy slug («استان»).
+	 *
+	 * @var string
+	 */
+	const TAXONOMY_PROVINCE = 'idea_province';
+
+	/**
+	 * City taxonomy slug («شهر»).
+	 *
+	 * @var string
+	 */
+	const TAXONOMY_CITY = 'idea_city';
+
+	/**
 	 * Returns the ordered map of the nine supported columns.
 	 *
 	 * The order of this array defines the column order expected in the spreadsheet.
@@ -243,6 +257,77 @@ class Idea_Network_CPT {
 				'show_in_nav_menus' => true,
 				'show_in_rest'      => true,
 				'rewrite'           => array( 'slug' => 'markaz-category' ),
+			)
+		);
+
+		self::register_location_taxonomies();
+	}
+
+	/**
+	 * Registers the «استان» and «شهر» taxonomies used by the Loop Grid filter.
+	 *
+	 * Both are flat (one province and one city per center) and get their terms
+	 * from the importer columns «نام استان» and «نام شهر», plus the full list of
+	 * Iranian provinces and cities.
+	 *
+	 * @return void
+	 */
+	public static function register_location_taxonomies() {
+		$province_labels = array(
+			'name'          => __( 'استان ها', 'excel-importer' ),
+			'singular_name' => __( 'استان', 'excel-importer' ),
+			'menu_name'     => __( 'استان ها', 'excel-importer' ),
+			'all_items'     => __( 'همه استان ها', 'excel-importer' ),
+			'edit_item'     => __( 'ویرایش استان', 'excel-importer' ),
+			'view_item'     => __( 'مشاهده استان', 'excel-importer' ),
+			'add_new_item'  => __( 'افزودن استان جدید', 'excel-importer' ),
+			'new_item_name' => __( 'نام استان جدید', 'excel-importer' ),
+			'search_items'  => __( 'جستجوی استان ها', 'excel-importer' ),
+			'not_found'     => __( 'استانی یافت نشد.', 'excel-importer' ),
+		);
+
+		register_taxonomy(
+			self::TAXONOMY_PROVINCE,
+			array( self::POST_TYPE ),
+			array(
+				'labels'             => $province_labels,
+				'hierarchical'       => false,
+				'public'             => true,
+				'publicly_queryable' => true,
+				'show_ui'            => true,
+				'show_admin_column'  => true,
+				'show_in_nav_menus'  => true,
+				'show_in_rest'       => true,
+				'rewrite'            => array( 'slug' => 'markaz-province' ),
+			)
+		);
+
+		$city_labels = array(
+			'name'          => __( 'شهرها', 'excel-importer' ),
+			'singular_name' => __( 'شهر', 'excel-importer' ),
+			'menu_name'     => __( 'شهرها', 'excel-importer' ),
+			'all_items'     => __( 'همه شهرها', 'excel-importer' ),
+			'edit_item'     => __( 'ویرایش شهر', 'excel-importer' ),
+			'view_item'     => __( 'مشاهده شهر', 'excel-importer' ),
+			'add_new_item'  => __( 'افزودن شهر جدید', 'excel-importer' ),
+			'new_item_name' => __( 'نام شهر جدید', 'excel-importer' ),
+			'search_items'  => __( 'جستجوی شهرها', 'excel-importer' ),
+			'not_found'     => __( 'شهری یافت نشد.', 'excel-importer' ),
+		);
+
+		register_taxonomy(
+			self::TAXONOMY_CITY,
+			array( self::POST_TYPE ),
+			array(
+				'labels'             => $city_labels,
+				'hierarchical'       => false,
+				'public'             => true,
+				'publicly_queryable' => true,
+				'show_ui'            => true,
+				'show_admin_column'  => true,
+				'show_in_nav_menus'  => true,
+				'show_in_rest'       => true,
+				'rewrite'            => array( 'slug' => 'markaz-city' ),
 			)
 		);
 	}

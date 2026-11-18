@@ -394,6 +394,11 @@ class Idea_Network_Admin {
 
 			}
 
+			// Link the center to its province/city terms (created when missing).
+			if ( class_exists( 'Idea_Network_Locations' ) ) {
+				Idea_Network_Locations::sync_post_terms( $post_id );
+			}
+
 			if ( $existing_id ) {
 				++$result['updated'];
 			} else {
