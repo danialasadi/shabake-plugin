@@ -4,7 +4,7 @@ Tags: excel, xlsx, csv, import, custom post type, idea network
 Requires at least: 6.0
 Tested up to: 6.7
 Requires PHP: 7.4
-Stable tag: 1.3.0
+Stable tag: 1.3.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -57,6 +57,11 @@ License URI: https://www.gnu.org/licenses/gpl-2.0.html
 خیر، فایل فقط در لحظه خوانده می‌شود و پس از پایان درخواست از بین می‌رود.
 
 == Changelog ==
+
+= 1.3.1 =
+* فیلد شهر تا انتخاب استان غیرفعال است و پس از آن فقط شهرهای همان استان نمایش داده می‌شود.
+* انتخاب دستی استان و شهر در ویرایشگر دیگر پس از ذخیره پاک نمی‌شود.
+* هم‌گام‌سازی استان و شهر در چند درخواست کوتاه انجام می‌شود تا درخواست نیمه‌کاره خطای «Commands out of sync» در دیتابیس نسازد.
 
 = 1.3.0 =
 * ویجت المنتور «فیلتر حلقه (دسته بندی، استان، شهر)» برای فیلتر Loop Grid بر اساس دسته‌بندی، استان، شهر و جستجو.

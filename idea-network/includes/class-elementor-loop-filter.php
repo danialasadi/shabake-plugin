@@ -415,7 +415,70 @@ class Idea_Network_Elementor {
 			}
 		}
 
+		return self::normalize_params( $params );
+	}
+
+	/**
+	 * Keeps the province and the city consistent.
+	 *
+	 * The city is a child of a province: a city slug alone (a shared link, a
+	 * cookie from another page) fills its province, a city that belongs to
+	 * another province replaces the selected one, and an unknown city is dropped
+	 * so a stale link can never filter by an unrelated city.
+	 *
+	 * @param array $params Filter parameters.
+	 * @return array
+	 */
+	public static function normalize_params( array $params ) {
+		$city = isset( $params['city'] ) ? (string) $params['city'] : '';
+
+		if ( '' === $city ) {
+			return $params;
+		}
+
+		$province = self::get_city_province_slug( $city );
+
+		if ( '' !== $province ) {
+			$params['province'] = $province;
+		} else {
+			$params['city'] = '';
+		}
+
 		return $params;
+	}
+
+	/**
+	 * Returns the slug of the province a city term belongs to.
+	 *
+	 * @param string $city_slug City term slug.
+	 * @return string Province slug, or an empty string when unknown.
+	 */
+	public static function get_city_province_slug( $city_slug ) {
+		$city_slug = sanitize_title( (string) $city_slug );
+
+		if ( '' === $city_slug ) {
+			return '';
+		}
+
+		$city = get_term_by( 'slug', $city_slug, Idea_Network_CPT::TAXONOMY_CITY );
+
+		if ( ! $city || is_wp_error( $city ) ) {
+			return '';
+		}
+
+		$province_id = (int) get_term_meta( (int) $city->term_id, Idea_Network_Locations::PROVINCE_META, true );
+
+		if ( ! $province_id ) {
+			return '';
+		}
+
+		$province = get_term( $province_id, Idea_Network_CPT::TAXONOMY_PROVINCE );
+
+		if ( ! $province || is_wp_error( $province ) ) {
+			return '';
+		}
+
+		return (string) $province->slug;
 	}
 
 	/**

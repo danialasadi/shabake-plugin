@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       معرفی شبکه ایده پردازی
  * Description:       یک پست‌تایپ سفارشی به نام «مرکز» می‌سازد و درون‌ریزی گروهی مراکز را از فایل اکسل (xlsx) یا CSV با نه فیلد متنی (نام مراکز، تعداد مراکز، تعداد استان، ایکون، آدرس، شماره تماس، آدرس وبسایت، نام شهر، نام استان) انجام می‌دهد. فقط ۹ ستون اول خوانده می‌شود و ستون‌های اضافه نادیده گرفته می‌شوند.
- * Version:           1.3.0
+ * Version:           1.3.1
  * Requires at least: 6.0
  * Requires PHP:      7.4
  * Author:            DANIAL
@@ -15,7 +15,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit; // Exit if accessed directly.
 }
 
-define( 'IDEA_NETWORK_VERSION', '1.3.0' );
+define( 'IDEA_NETWORK_VERSION', '1.3.1' );
 define( 'IDEA_NETWORK_PATH', plugin_dir_path( __FILE__ ) );
 define( 'IDEA_NETWORK_URL', plugin_dir_url( __FILE__ ) );
 

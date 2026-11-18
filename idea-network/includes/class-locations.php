@@ -62,6 +62,32 @@ class Idea_Network_Locations {
 	const SYNC_BATCH = 300;
 
 	/**
+	 * Seconds the manual sync may spend on one request.
+	 *
+	 * A shared host kills a request that runs for too long while it is writing
+	 * to MySQL, which leaves the connection in a broken state («Commands out of
+	 * sync» errors on shutdown). The remaining centers are handled by the next
+	 * request instead.
+	 *
+	 * @var int
+	 */
+	const MAX_SYNC_SECONDS = 15;
+
+	/**
+	 * Number of city terms that must exist before seeding is skipped.
+	 *
+	 * @var int
+	 */
+	const MIN_CITIES = 600;
+
+	/**
+	 * Transient preventing two admin requests from seeding at the same time.
+	 *
+	 * @var string
+	 */
+	const LOCK_TRANSIENT = 'idea_network_locations_lock';
+
+	/**
 	 * Registers hooks.
 	 *
 	 * @return void
@@ -267,6 +293,14 @@ class Idea_Network_Locations {
 			'cities'    => 0,
 		);
 
+		// Every term already exists: only the stored version needs refreshing.
+		if ( self::locations_exist() ) {
+			update_option( self::OPTION_VERSION, IDEA_NETWORK_VERSION, false );
+			self::link_orphan_cities();
+
+			return $counts;
+		}
+
 		foreach ( self::get_data() as $province_name => $cities ) {
 			$province = self::get_or_create_province( $province_name );
 
@@ -285,7 +319,109 @@ class Idea_Network_Locations {
 
 		update_option( self::OPTION_VERSION, IDEA_NETWORK_VERSION, false );
 
+		self::link_orphan_cities();
+
 		return $counts;
+	}
+
+	/**
+	 * Checks whether every province and city term is already in the database.
+	 *
+	 * @return bool
+	 */
+	public static function locations_exist() {
+		if ( ! function_exists( 'wp_count_terms' ) ) {
+			return false;
+		}
+
+		$provinces = wp_count_terms(
+			array(
+				'taxonomy'   => Idea_Network_CPT::TAXONOMY_PROVINCE,
+				'hide_empty' => false,
+			)
+		);
+		$cities    = wp_count_terms(
+			array(
+				'taxonomy'   => Idea_Network_CPT::TAXONOMY_CITY,
+				'hide_empty' => false,
+			)
+		);
+
+		if ( is_wp_error( $provinces ) || is_wp_error( $cities ) ) {
+			return false;
+		}
+
+		return (int) $provinces >= count( self::get_data() ) && (int) $cities >= self::MIN_CITIES;
+	}
+
+	/**
+	 * Links city terms that have no province yet to the province of their centers.
+	 *
+	 * A city must always know its province, otherwise the dependent city dropdown
+	 * can never show it. Cities typed by hand in the editor or created by an old
+	 * import have no link until one of their centers is saved.
+	 *
+	 * @param int $limit Maximum number of cities checked per call.
+	 * @return int Number of cities linked.
+	 */
+	public static function link_orphan_cities( $limit = 200 ) {
+		$cities = get_terms(
+			array(
+				'taxonomy'   => Idea_Network_CPT::TAXONOMY_CITY,
+				'hide_empty' => false,
+				'fields'     => 'ids',
+				'number'     => max( 1, (int) $limit ),
+				'meta_query' => array( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query
+					array(
+						'key'     => self::PROVINCE_META,
+						'compare' => 'NOT EXISTS',
+					),
+				),
+			)
+		);
+
+		if ( is_wp_error( $cities ) || empty( $cities ) ) {
+			return 0;
+		}
+
+		$linked = 0;
+
+		foreach ( (array) $cities as $city_id ) {
+			$city_id = (int) $city_id;
+			$posts   = get_posts(
+				array(
+					'post_type'              => Idea_Network_CPT::POST_TYPE,
+					'post_status'            => 'any',
+					'posts_per_page'         => 1,
+					'fields'                 => 'ids',
+					'no_found_rows'          => true,
+					'update_post_meta_cache' => false,
+					'update_post_term_cache' => false,
+					'tax_query'              => array( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_tax_query
+						array(
+							'taxonomy' => Idea_Network_CPT::TAXONOMY_CITY,
+							'field'    => 'term_id',
+							'terms'    => array( $city_id ),
+						),
+					),
+				)
+			);
+
+			if ( empty( $posts ) ) {
+				continue;
+			}
+
+			$province_ids = wp_get_object_terms( (int) $posts[0], Idea_Network_CPT::TAXONOMY_PROVINCE, array( 'fields' => 'ids' ) );
+
+			if ( is_wp_error( $province_ids ) || empty( $province_ids ) ) {
+				continue;
+			}
+
+			update_term_meta( $city_id, self::PROVINCE_META, (int) $province_ids[0] );
+			++$linked;
+		}
+
+		return $linked;
 	}
 
 	/**
@@ -305,6 +441,12 @@ class Idea_Network_Locations {
 			return;
 		}
 
+		// A term picked in the edit screen wins over the meta fields. Without this
+		// guard a center whose «نام استان» field was empty lost the province
+		// chosen by hand on every save, so the selection seemed to vanish.
+		$province_from_editor = self::has_submitted_terms( Idea_Network_CPT::TAXONOMY_PROVINCE );
+		$city_from_editor     = self::has_submitted_terms( Idea_Network_CPT::TAXONOMY_CITY );
+
 		$meta_fields = Idea_Network_CPT::get_meta_fields();
 		$province    = '';
 		$city        = '';
@@ -317,26 +459,97 @@ class Idea_Network_Locations {
 			}
 		}
 
-		$province_term = '' !== trim( (string) $province ) ? self::get_or_create_province( $province ) : null;
-		$city_term     = 0;
+		$province_term = ( ! $province_from_editor && '' !== trim( (string) $province ) ) ? self::get_or_create_province( $province ) : null;
 
-		if ( '' !== trim( (string) $city ) ) {
-			$city_term = self::get_or_create_city( $city, $province_term );
+		if ( $province_term ) {
+			wp_set_object_terms( $post_id, array( (int) $province_term->term_id ), Idea_Network_CPT::TAXONOMY_PROVINCE, false );
 		}
 
-		wp_set_object_terms(
-			$post_id,
-			$province_term ? array( (int) $province_term->term_id ) : array(),
-			Idea_Network_CPT::TAXONOMY_PROVINCE,
-			false
-		);
+		if ( ! $city_from_editor && '' !== trim( (string) $city ) ) {
+			$city_province = $province_term ? $province_term : self::get_post_province_term( $post_id );
 
-		wp_set_object_terms(
-			$post_id,
-			$city_term ? array( $city_term ) : array(),
-			Idea_Network_CPT::TAXONOMY_CITY,
-			false
-		);
+			if ( $city_province ) {
+				$city_term = self::get_or_create_city( $city, $city_province );
+
+				if ( $city_term ) {
+					wp_set_object_terms( $post_id, array( $city_term ), Idea_Network_CPT::TAXONOMY_CITY, false );
+				}
+			}
+		}
+
+		self::sync_meta_from_terms( $post_id );
+	}
+
+	/**
+	 * Checks whether the edit screen sent a selection for a taxonomy.
+	 *
+	 * The classic editor posts `tax_input[taxonomy]` (an empty string when every
+	 * term was removed), which means the editor knows better than the meta field.
+	 *
+	 * @param string $taxonomy Taxonomy slug.
+	 * @return bool
+	 */
+	private static function has_submitted_terms( $taxonomy ) {
+		if ( ! isset( $_POST['tax_input'] ) || ! is_array( $_POST['tax_input'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Missing
+			return false;
+		}
+
+		return array_key_exists( $taxonomy, $_POST['tax_input'] ); // phpcs:ignore WordPress.Security.NonceVerification.Missing
+	}
+
+	/**
+	 * Returns the first province term of a center.
+	 *
+	 * @param int $post_id Post ID.
+	 * @return WP_Term|null
+	 */
+	private static function get_post_province_term( $post_id ) {
+		$terms = wp_get_object_terms( (int) $post_id, Idea_Network_CPT::TAXONOMY_PROVINCE );
+
+		if ( is_wp_error( $terms ) || empty( $terms ) ) {
+			return null;
+		}
+
+		return $terms[0];
+	}
+
+	/**
+	 * Fills the empty «نام استان» / «نام شهر» fields from the saved terms.
+	 *
+	 * Also links a city term to the province of the center, so a city typed by
+	 * hand in the editor always ends up under the right province.
+	 *
+	 * @param int $post_id Post ID.
+	 * @return void
+	 */
+	private static function sync_meta_from_terms( $post_id ) {
+		$post_id = (int) $post_id;
+
+		$province_terms = wp_get_object_terms( $post_id, Idea_Network_CPT::TAXONOMY_PROVINCE );
+		$city_terms     = wp_get_object_terms( $post_id, Idea_Network_CPT::TAXONOMY_CITY );
+
+		$province_terms = is_wp_error( $province_terms ) ? array() : (array) $province_terms;
+		$city_terms     = is_wp_error( $city_terms ) ? array() : (array) $city_terms;
+
+		if ( $province_terms ) {
+			$province_name = trim( (string) $province_terms[0]->name );
+
+			if ( '' !== $province_name && '' === trim( (string) get_post_meta( $post_id, 'ei_province_name', true ) ) ) {
+				update_post_meta( $post_id, 'ei_province_name', $province_name );
+			}
+		}
+
+		if ( $city_terms ) {
+			$city_name = trim( (string) $city_terms[0]->name );
+
+			if ( '' !== $city_name && '' === trim( (string) get_post_meta( $post_id, 'ei_city', true ) ) ) {
+				update_post_meta( $post_id, 'ei_city', $city_name );
+			}
+
+			if ( $province_terms && ! get_term_meta( (int) $city_terms[0]->term_id, self::PROVINCE_META, true ) ) {
+				update_term_meta( (int) $city_terms[0]->term_id, self::PROVINCE_META, (int) $province_terms[0]->term_id );
+			}
+		}
 	}
 
 	/**
@@ -384,6 +597,12 @@ class Idea_Network_Locations {
 	 * @return void
 	 */
 	public static function maybe_upgrade() {
+		if ( ! self::can_run_background_work() || self::is_locked() ) {
+			return;
+		}
+
+		self::lock();
+
 		$version = get_option( self::OPTION_VERSION );
 
 		if ( IDEA_NETWORK_VERSION !== $version ) {
@@ -395,16 +614,81 @@ class Idea_Network_Locations {
 
 		$pending = get_option( self::OPTION_PENDING );
 
-		if ( false === $pending ) {
-			return;
+		if ( false !== $pending ) {
+			$batch = self::sync_posts_batch( (int) $pending );
+
+			if ( $batch['done'] ) {
+				delete_option( self::OPTION_PENDING );
+			} else {
+				update_option( self::OPTION_PENDING, (int) $batch['next_offset'], false );
+			}
 		}
 
-		$batch = self::sync_posts_batch( (int) $pending );
+		self::unlock();
+	}
 
-		if ( $batch['done'] ) {
-			delete_option( self::OPTION_PENDING );
-		} else {
-			update_option( self::OPTION_PENDING, (int) $batch['next_offset'], false );
+	/**
+	 * Checks whether the current request may run batches of term writes.
+	 *
+	 * AJAX, REST and WP-Cron requests are skipped because the browser (or the
+	 * server) can end them at any moment; a request killed in the middle of a
+	 * query leaves the MySQL connection broken and every later query of that
+	 * request fails with «Commands out of sync».
+	 *
+	 * @return bool
+	 */
+	public static function can_run_background_work() {
+		if ( defined( 'DOING_AUTOSAVE' ) && DOING_AUTOSAVE ) {
+			return false;
+		}
+
+		if ( function_exists( 'wp_doing_ajax' ) && wp_doing_ajax() ) {
+			return false;
+		}
+
+		if ( function_exists( 'wp_doing_cron' ) && wp_doing_cron() ) {
+			return false;
+		}
+
+		if ( defined( 'REST_REQUEST' ) && REST_REQUEST ) {
+			return false;
+		}
+
+		if ( defined( 'WP_CLI' ) && WP_CLI ) {
+			return true;
+		}
+
+		return ! function_exists( 'current_user_can' ) || current_user_can( 'manage_options' );
+	}
+
+	/**
+	 * Checks whether another admin request is already seeding.
+	 *
+	 * @return bool
+	 */
+	private static function is_locked() {
+		return function_exists( 'get_transient' ) && (bool) get_transient( self::LOCK_TRANSIENT );
+	}
+
+	/**
+	 * Marks the seed as running so two admin requests never seed at once.
+	 *
+	 * @return void
+	 */
+	private static function lock() {
+		if ( function_exists( 'set_transient' ) ) {
+			set_transient( self::LOCK_TRANSIENT, 1, 5 * MINUTE_IN_SECONDS );
+		}
+	}
+
+	/**
+	 * Releases the seed lock.
+	 *
+	 * @return void
+	 */
+	private static function unlock() {
+		if ( function_exists( 'delete_transient' ) ) {
+			delete_transient( self::LOCK_TRANSIENT );
 		}
 	}
 
@@ -436,28 +720,40 @@ class Idea_Network_Locations {
 
 		check_admin_referer( self::NONCE_SYNC );
 
-		self::seed();
-		delete_option( self::OPTION_PENDING );
+		$offset = isset( $_GET['offset'] ) ? max( 0, (int) $_GET['offset'] ) : 0; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 
-		$total = 0;
-		$batch = self::sync_posts_batch( 0 );
-
-		while ( ! $batch['done'] ) {
-			$total += $batch['synced'];
-			$batch  = self::sync_posts_batch( $batch['next_offset'] );
+		if ( 0 === $offset ) {
+			self::seed();
+			delete_option( self::OPTION_PENDING );
 		}
 
-		$total += $batch['synced'];
+		// Only a slice of the centers is handled per request: a long write burst
+		// is what makes a shared host kill the request while MySQL is still busy.
+		$started = time();
+		$total   = 0;
+		$batch   = self::sync_posts_batch( $offset );
 
-		set_transient(
-			'idea_network_locations_synced_' . get_current_user_id(),
-			(int) $total,
-			15 * MINUTE_IN_SECONDS
-		);
+		$total += (int) $batch['synced'];
 
-		wp_safe_redirect(
-			admin_url( 'edit.php?post_type=' . Idea_Network_CPT::POST_TYPE . '&page=idea-network-locations' )
-		);
+		while ( ! $batch['done'] && ( time() - $started ) < self::MAX_SYNC_SECONDS ) {
+			$batch  = self::sync_posts_batch( (int) $batch['next_offset'] );
+			$total += (int) $batch['synced'];
+		}
+
+		$key    = 'idea_network_locations_synced_' . get_current_user_id();
+		$so_far = (int) get_transient( $key );
+
+		set_transient( $key, $so_far + $total, 15 * MINUTE_IN_SECONDS );
+
+		$redirect = admin_url( 'edit.php?post_type=' . Idea_Network_CPT::POST_TYPE . '&page=idea-network-locations' );
+
+		if ( ! $batch['done'] ) {
+			$redirect = add_query_arg( 'offset', (int) $batch['next_offset'], $redirect );
+		} else {
+			self::link_orphan_cities();
+		}
+
+		wp_safe_redirect( $redirect );
 		exit;
 	}
 
@@ -473,6 +769,7 @@ class Idea_Network_Locations {
 
 		$synced_key = 'idea_network_locations_synced_' . get_current_user_id();
 		$synced     = get_transient( $synced_key );
+		$offset     = isset( $_GET['offset'] ) ? max( 0, (int) $_GET['offset'] ) : 0; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 
 		if ( false !== $synced ) {
 			delete_transient( $synced_key );
@@ -512,6 +809,17 @@ class Idea_Network_Locations {
 			self::NONCE_SYNC
 		);
 
+		if ( $offset > 0 ) {
+			$sync_url = wp_nonce_url(
+				add_query_arg(
+					'offset',
+					$offset,
+					admin_url( 'admin-post.php?action=' . self::ACTION_SYNC )
+				),
+				self::NONCE_SYNC
+			);
+		}
+
 		?>
 		<div class="wrap ei-wrap">
 			<h1><?php esc_html_e( 'استان و شهر', 'excel-importer' ); ?></h1>
@@ -523,6 +831,20 @@ class Idea_Network_Locations {
 						printf(
 							/* translators: %s: number of centers. */
 							esc_html__( 'استان و شهر %s مرکز هم‌گام شد.', 'excel-importer' ),
+							esc_html( number_format_i18n( (int) $synced ) )
+						);
+						?>
+					</h3>
+				</div>
+			<?php endif; ?>
+
+			<?php if ( $offset > 0 ) : ?>
+				<div class="ei-notice is-warning">
+					<h3>
+						<?php
+						printf(
+							/* translators: %s: number of centers already synced. */
+						esc_html__( 'هم‌گام‌سازی در این درخواست تمام نشد (%s مرکز تا این لحظه). برای ادامه دوباره دکمه را بزنید.', 'excel-importer' ),
 							esc_html( number_format_i18n( (int) $synced ) )
 						);
 						?>
@@ -587,7 +909,7 @@ class Idea_Network_Locations {
 
 				<p>
 					<a class="button button-primary" href="<?php echo esc_url( $sync_url ); ?>">
-						<?php esc_html_e( 'هم‌گام‌سازی دوباره استان و شهر همه مراکز', 'excel-importer' ); ?>
+						<?php echo esc_html( $offset > 0 ? __( 'ادامه هم‌گام‌سازی', 'excel-importer' ) : __( 'هم‌گام‌سازی دوباره استان و شهر همه مراکز', 'excel-importer' ) ); ?>
 					</a>
 				</p>
 

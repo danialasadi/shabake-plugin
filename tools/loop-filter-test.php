@@ -109,7 +109,7 @@ namespace {
 	define( 'ABSPATH', __DIR__ );
 	define( 'IDEA_NETWORK_PATH', dirname( __DIR__ ) . '/idea-network/' );
 	define( 'IDEA_NETWORK_URL', 'http://example.test/wp-content/plugins/idea-network/' );
-	define( 'IDEA_NETWORK_VERSION', '1.3.0' );
+	define( 'IDEA_NETWORK_VERSION', '1.3.1' );
 	define( 'MINUTE_IN_SECONDS', 60 );
 
 	$GLOBALS['lf_passes']         = 0;
@@ -471,6 +471,47 @@ namespace {
 		return isset( $GLOBALS['lf_terms'][ $taxonomy ][ $term_id ] ) ? $GLOBALS['lf_terms'][ $taxonomy ][ $term_id ] : null;
 	}
 
+	function get_term_by( $field, $value, $taxonomy = '' ) {
+		$terms = isset( $GLOBALS['lf_terms'][ $taxonomy ] ) ? $GLOBALS['lf_terms'][ $taxonomy ] : array();
+
+		foreach ( $terms as $term ) {
+			if ( 'slug' === $field && (string) $term->slug === (string) $value ) {
+				return $term;
+			}
+
+			if ( 'name' === $field && (string) $term->name === (string) $value ) {
+				return $term;
+			}
+
+			if ( 'id' === $field && (int) $term->term_id === (int) $value ) {
+				return $term;
+			}
+		}
+
+		return null;
+	}
+
+	function wp_get_object_terms( $post_id, $taxonomy, $args = array() ) {
+		$ids    = isset( $GLOBALS['lf_object_terms'][ $post_id ][ $taxonomy ] ) ? (array) $GLOBALS['lf_object_terms'][ $post_id ][ $taxonomy ] : array();
+		$fields = isset( $args['fields'] ) ? $args['fields'] : 'all';
+
+		if ( 'ids' === $fields ) {
+			return array_map( 'intval', $ids );
+		}
+
+		$terms = array();
+
+		foreach ( $ids as $id ) {
+			$term = isset( $GLOBALS['lf_terms'][ $taxonomy ][ $id ] ) ? $GLOBALS['lf_terms'][ $taxonomy ][ $id ] : null;
+
+			if ( $term ) {
+				$terms[] = $term;
+			}
+		}
+
+		return $terms;
+	}
+
 	function get_terms( $args = array() ) {
 		$taxonomy = is_array( $args ) && isset( $args['taxonomy'] ) ? $args['taxonomy'] : '';
 		$terms    = isset( $GLOBALS['lf_terms'][ $taxonomy ] ) ? array_values( $GLOBALS['lf_terms'][ $taxonomy ] ) : array();
@@ -481,6 +522,15 @@ namespace {
 				return strcmp( $a->name, $b->name );
 			}
 		);
+
+		if ( is_array( $args ) && isset( $args['fields'] ) && 'ids' === $args['fields'] ) {
+			return array_map(
+				function ( $term ) {
+					return (int) $term->term_id;
+				},
+				$terms
+			);
+		}
 
 		return $terms;
 	}
@@ -609,6 +659,7 @@ namespace {
 	lf_assert( $fars instanceof WP_Term && 'فارس' === $fars->name, 'province term «فارس» exists after seeding' );
 
 	$shiraz = Idea_Network_Locations::get_or_create_city( 'شیراز', $fars );
+	$shiraz_term = get_term( $shiraz, 'idea_city' );
 	lf_assert( $shiraz > 0, 'city «شیراز» exists in فارس' );
 	lf_same( (int) $fars->term_id, (int) get_term_meta( $shiraz, Idea_Network_Locations::PROVINCE_META, true ), 'city term is linked to its province' );
 
@@ -656,6 +707,29 @@ namespace {
 	$GLOBALS['lf_post_types'][502] = 'post';
 	Idea_Network_Locations::sync_post_terms( 502 );
 	lf_assert( empty( $GLOBALS['lf_object_terms'][502] ), 'sync ignores other post types' );
+
+	// A province picked in the edit screen must survive the save, even when the
+	// «نام استان» field is empty (the reported «انتخاب استان ناپدید می‌شود» bug).
+	$GLOBALS['lf_post_types'][503]   = 'idea_center';
+	$GLOBALS['lf_post_meta'][503]    = array(
+		'ei_province_name' => '',
+		'ei_city'          => '',
+	);
+	$GLOBALS['lf_object_terms'][503] = array(
+		'idea_province' => array( (int) $fars->term_id ),
+	);
+
+	$_POST['tax_input']['idea_province'] = 'فارس';
+
+	Idea_Network_Locations::sync_post_terms( 503 );
+
+	lf_same( array( (int) $fars->term_id ), $GLOBALS['lf_object_terms'][503]['idea_province'], 'the province chosen in the edit screen survives a save' );
+	lf_same( 'فارس', get_post_meta( 503, 'ei_province_name', true ), 'the empty «نام استان» field is filled from the chosen province' );
+
+	unset( $_POST['tax_input'] );
+
+	Idea_Network_Locations::sync_post_terms( 503 );
+	lf_same( array( (int) $fars->term_id ), $GLOBALS['lf_object_terms'][503]['idea_province'], 'an empty «نام استان» never removes a saved province' );
 
 	// =======================================================================
 	// 5) Tax query building
@@ -792,18 +866,42 @@ namespace {
 	// 7) Filter parameters
 	// =======================================================================
 	$_GET = array(
-		'shabake_cat'      => 'Canon',
-		'shabake_province' => 'fars',
-		'shabake_city'     => 'shiraz',
-		'shabake_s'        => '  کانون مهر  ',
+		'shabake_cat'  => 'Canon',
+		'shabake_city' => $shiraz_term->slug,
+		'shabake_s'    => '  کانون مهر  ',
 	);
 
 	$params = Idea_Network_Elementor::get_filter_params();
 
 	lf_same( 'canon', $params['category'], 'category parameter is sanitised as a slug' );
-	lf_same( 'fars', $params['province'], 'province parameter is read' );
-	lf_same( 'shiraz', $params['city'], 'city parameter is read' );
+	lf_same( (string) $fars->slug, $params['province'], 'the province is derived from the selected city' );
+	lf_same( $shiraz_term->slug, $params['city'], 'city parameter is read' );
 	lf_same( 'کانون مهر', $params['search'], 'search parameter is trimmed' );
+
+	// A city that belongs to another province replaces the selected province.
+	$_GET = array(
+		'shabake_province' => (string) $fars->slug,
+		'shabake_city'     => (string) $duplicate_term->slug,
+	);
+
+	$params = Idea_Network_Elementor::get_filter_params();
+
+	lf_same( (string) $kermanshah->slug, $params['province'], 'a city of another province replaces the selected province' );
+	lf_same( (string) $duplicate_term->slug, $params['city'], 'the city keeps its own slug' );
+
+	// A stale or hand-written city slug can never filter by an unrelated city.
+	$_GET   = array(
+		'shabake_province' => (string) $fars->slug,
+		'shabake_city'     => 'not-a-city',
+	);
+	$params = Idea_Network_Elementor::get_filter_params();
+
+	lf_same( '', $params['city'], 'an unknown city is dropped' );
+
+	$_GET = array(
+		'shabake_province' => 'fars',
+		'shabake_city'     => $shiraz_term->slug,
+	);
 
 	$_SERVER['REQUEST_URI'] = '/markaz/?custom=1&paged=2&shabake_province=fars';
 	$action                 = Idea_Network_Elementor::get_form_action();
@@ -846,8 +944,8 @@ namespace {
 	// 9b) Simulating the Loop Grid query flow (Elementor_Post_Query)
 	// -----------------------------------------------------------------------
 	$_GET                = array(
-		'shabake_province' => 'fars',
-		'shabake_city'     => 'shiraz',
+		'shabake_province' => (string) $fars->slug,
+		'shabake_city'     => (string) $shiraz_term->slug,
 	);
 	$_COOKIE             = array();
 	$GLOBALS['lf_ajax']  = false;
@@ -933,6 +1031,8 @@ namespace {
 	lf_assert( isset( $GLOBALS['widget_controls']['city_all_label'] ), 'city «all» label control exists' );
 	lf_assert( isset( $GLOBALS['widget_controls']['query_id'] ), 'query ID control exists' );
 	lf_assert( isset( $GLOBALS['widget_controls']['cities_by_province'] ), 'dependent city control exists' );
+	lf_assert( isset( $GLOBALS['widget_controls']['require_province'] ), 'the «province first» control exists' );
+	lf_assert( isset( $GLOBALS['widget_controls']['city_need_province_label'] ), 'the locked city label control exists' );
 	lf_assert( isset( $GLOBALS['widget_groups']['field_typography'] ), 'typography style control exists' );
 
 	$_GET                   = array(
@@ -980,6 +1080,19 @@ namespace {
 	lf_assert( false !== strpos( $html, 'همه شهرها' ), 'city «all» option is rendered' );
 	lf_assert( false !== strpos( $html, 'selected="selected"' ), 'the selected province is kept after filtering' );
 	lf_assert( false !== strpos( $html, 'name="custom" value="1"' ), 'unrelated URL parameters survive in the form' );
+	lf_assert( false === strpos( $html, 'disabled="disabled"' ), 'the city dropdown is enabled once a province is selected' );
+
+	// Without a province the city dropdown is locked and asks for a province.
+	$_GET = array();
+
+	ob_start();
+	$render->invoke( $render_widget );
+	$locked_html = ob_get_clean();
+
+	lf_assert( false !== strpos( $locked_html, 'disabled="disabled"' ), 'the city dropdown is disabled until a province is selected' );
+	lf_assert( false !== strpos( $locked_html, 'ابتدا استان را انتخاب کنید' ), 'the locked city dropdown asks for a province first' );
+	lf_assert( false !== strpos( $locked_html, 'data-need-province-label=' ), 'the city select carries the locked label' );
+	lf_assert( false !== strpos( $locked_html, 'requireProvince' ), 'the script is told that the city needs a province' );
 
 	$hidden_widget = new Idea_Network_Loop_Filter_Widget(
 		array(

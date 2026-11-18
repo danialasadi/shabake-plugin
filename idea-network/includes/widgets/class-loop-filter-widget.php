@@ -189,6 +189,16 @@ class Idea_Network_Loop_Filter_Widget extends \Elementor\Widget_Base {
 		);
 
 		$this->add_control(
+			'city_need_province_label',
+			array(
+				'label'     => __( 'متن فیلد شهر پیش از انتخاب استان', 'excel-importer' ),
+				'type'      => $controls::TEXT,
+				'default'   => __( 'ابتدا استان را انتخاب کنید', 'excel-importer' ),
+				'condition' => array( 'show_city' => 'yes' ),
+			)
+		);
+
+		$this->add_control(
 			'show_search',
 			array(
 				'label'        => __( 'جستجو', 'excel-importer' ),
@@ -260,6 +270,18 @@ class Idea_Network_Loop_Filter_Widget extends \Elementor\Widget_Base {
 		);
 
 		$this->add_control(
+			'require_province',
+			array(
+				'label'        => __( 'اول استان، بعد شهر', 'excel-importer' ),
+				'type'         => $controls::SWITCHER,
+				'default'      => 'yes',
+				'return_value' => 'yes',
+				'description'  => __( 'تا وقتی استانی انتخاب نشود، فیلد شهر غیرفعال است و فهرست آن خالی می‌ماند.', 'excel-importer' ),
+				'separator'    => 'before',
+			)
+		);
+
+		$this->add_control(
 			'cities_by_province',
 			array(
 				'label'        => __( 'فقط شهرهای استان انتخاب‌شده', 'excel-importer' ),
@@ -267,7 +289,6 @@ class Idea_Network_Loop_Filter_Widget extends \Elementor\Widget_Base {
 				'default'      => 'yes',
 				'return_value' => 'yes',
 				'description'  => __( 'وقتی استانی انتخاب شود، فهرست شهرها به شهرهای همان استان محدود می‌شود.', 'excel-importer' ),
-				'separator'    => 'before',
 			)
 		);
 
@@ -416,6 +437,10 @@ class Idea_Network_Loop_Filter_Widget extends \Elementor\Widget_Base {
 
 		$params = Idea_Network_Elementor::get_filter_params();
 
+		// The city dropdown stays locked until a province is chosen.
+		$require_province = 'yes' === $this->get_yes_no( $settings, 'require_province' ) && $show_city && $show_province;
+		$city_locked      = $require_province && '' === $params['province'];
+
 		$labels = array(
 			'category'       => isset( $settings['category_label'] ) ? (string) $settings['category_label'] : __( 'دسته بندی', 'excel-importer' ),
 			'category_all'   => isset( $settings['category_all_label'] ) ? (string) $settings['category_all_label'] : __( 'همه دسته بندی ها', 'excel-importer' ),
@@ -423,6 +448,7 @@ class Idea_Network_Loop_Filter_Widget extends \Elementor\Widget_Base {
 			'province_all'   => isset( $settings['province_all_label'] ) ? (string) $settings['province_all_label'] : __( 'همه استان ها', 'excel-importer' ),
 			'city'           => isset( $settings['city_label'] ) ? (string) $settings['city_label'] : __( 'شهر', 'excel-importer' ),
 			'city_all'       => isset( $settings['city_all_label'] ) ? (string) $settings['city_all_label'] : __( 'همه شهرها', 'excel-importer' ),
+			'city_need'      => isset( $settings['city_need_province_label'] ) ? (string) $settings['city_need_province_label'] : __( 'ابتدا استان را انتخاب کنید', 'excel-importer' ),
 			'search'         => isset( $settings['search_placeholder'] ) ? (string) $settings['search_placeholder'] : __( 'جستجوی نام مرکز', 'excel-importer' ),
 			'submit'         => isset( $settings['submit_label'] ) ? (string) $settings['submit_label'] : __( 'اعمال فیلتر', 'excel-importer' ),
 		);
@@ -437,6 +463,7 @@ class Idea_Network_Loop_Filter_Widget extends \Elementor\Widget_Base {
 					array(
 						'autoSubmit'       => $auto_submit,
 						'citiesByProvince' => $cities_by_province,
+						'requireProvince'  => $require_province,
 					)
 				),
 			)
@@ -445,6 +472,10 @@ class Idea_Network_Loop_Filter_Widget extends \Elementor\Widget_Base {
 		$categories = $show_category ? Idea_Network_Elementor::get_categories_terms() : array();
 		$provinces  = $show_province || $show_city ? Idea_Network_Elementor::get_provinces() : array();
 		$cities     = $show_city ? Idea_Network_Elementor::get_cities() : array();
+
+		if ( $require_province && '' !== $params['province'] ) {
+			$cities = $this->filter_cities_by_province( $cities, $params['province'] );
+		}
 
 		$category_parents = array();
 
@@ -502,14 +533,18 @@ class Idea_Network_Loop_Filter_Widget extends \Elementor\Widget_Base {
 							aria-label="<?php echo esc_attr( $labels['city'] ); ?>"
 							data-filter="city"
 							data-all-label="<?php echo esc_attr( $labels['city_all'] ); ?>"
+							data-need-province-label="<?php echo esc_attr( $labels['city_need'] ); ?>"
 							data-cities="<?php echo esc_attr( wp_json_encode( Idea_Network_Elementor::get_cities_payload() ) ); ?>"
+							<?php if ( $city_locked ) : ?>disabled="disabled"<?php endif; ?>
 						>
-							<option value=""><?php echo esc_html( $labels['city_all'] ); ?></option>
-							<?php foreach ( $cities as $city_term ) : ?>
-								<option value="<?php echo esc_attr( $city_term->slug ); ?>" <?php selected( $params['city'], $city_term->slug ); ?>>
-									<?php echo esc_html( $city_term->name ); ?>
-								</option>
-							<?php endforeach; ?>
+							<option value=""><?php echo esc_html( $city_locked ? $labels['city_need'] : $labels['city_all'] ); ?></option>
+							<?php if ( ! $city_locked ) : ?>
+								<?php foreach ( $cities as $city_term ) : ?>
+									<option value="<?php echo esc_attr( $city_term->slug ); ?>" <?php selected( $params['city'], $city_term->slug ); ?>>
+										<?php echo esc_html( $city_term->name ); ?>
+									</option>
+								<?php endforeach; ?>
+							<?php endif; ?>
 						</select>
 					</div>
 				<?php endif; ?>
@@ -578,6 +613,35 @@ class Idea_Network_Loop_Filter_Widget extends \Elementor\Widget_Base {
 		}
 
 		return $preserve;
+	}
+
+	/**
+	 * Keeps only the cities of one province in the city dropdown.
+	 *
+	 * Used for the server-rendered list so that the page is already correct
+	 * before the script runs (and when it cannot run at all).
+	 *
+	 * @param array<int,WP_Term> $cities        City terms.
+	 * @param string             $province_slug Selected province slug.
+	 * @return array<int,WP_Term>
+	 */
+	private function filter_cities_by_province( array $cities, $province_slug ) {
+		$allowed = array();
+
+		foreach ( Idea_Network_Elementor::get_cities_payload() as $item ) {
+			if ( $province_slug === $item['province'] ) {
+				$allowed[ (string) $item['slug'] ] = true;
+			}
+		}
+
+		return array_values(
+			array_filter(
+				$cities,
+				function ( $city_term ) use ( $allowed ) {
+					return isset( $allowed[ (string) $city_term->slug ] );
+				}
+			)
+		);
 	}
 
 	/**

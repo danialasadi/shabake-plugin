@@ -52,6 +52,8 @@
 		var search = form.querySelector( '[data-filter="search"]' );
 		var cities = city ? parseJSON( city.getAttribute( 'data-cities' ) || '', [] ) : [];
 		var cityAllLabel = city ? ( city.getAttribute( 'data-all-label' ) || '' ) : '';
+		var cityNeedProvinceLabel = city ? ( city.getAttribute( 'data-need-province-label' ) || cityAllLabel ) : '';
+		var requireProvince = !! settings.requireProvince;
 		var submitTimer = null;
 		var searchTimer = null;
 
@@ -74,8 +76,18 @@
 			submitTimer = window.setTimeout( submit, 250 );
 		}
 
-		function matchingCities() {
-			if ( ! settings.citiesByProvince || ! province || ! province.value ) {
+		// The city is a child of a province: without a province there is no city
+		// list at all, and with one only that province's cities are offered.
+		function cityNeedsProvince() {
+			return !! ( requireProvince && province && ! province.value );
+		}
+
+		function citiesForProvince() {
+			if ( ! province || ! province.value ) {
+				return requireProvince ? [] : cities;
+			}
+
+			if ( ! settings.citiesByProvince ) {
 				return cities;
 			}
 
@@ -90,12 +102,13 @@
 			}
 
 			var previous = preserveSelection ? city.value : '';
-			var list = matchingCities();
+			var locked = cityNeedsProvince();
+			var list = citiesForProvince();
 			var fragment = document.createDocumentFragment();
 			var placeholder = document.createElement( 'option' );
 
 			placeholder.value = '';
-			placeholder.textContent = cityAllLabel;
+			placeholder.textContent = locked ? cityNeedProvinceLabel : cityAllLabel;
 			fragment.appendChild( placeholder );
 
 			list.forEach( function ( item ) {
@@ -108,11 +121,16 @@
 
 			city.innerHTML = '';
 			city.appendChild( fragment );
-			city.value = previous;
 
-			if ( previous && ! list.some( function ( item ) { return item.slug === previous; } ) ) {
+			if ( ! locked && previous && list.some( function ( item ) { return item.slug === previous; } ) ) {
+				city.value = previous;
+			} else {
 				city.value = '';
 			}
+
+			city.disabled = locked;
+			city.setAttribute( 'aria-disabled', locked ? 'true' : 'false' );
+			form.classList.toggle( 'shabake-loop-filter--city-locked', locked );
 		}
 
 		if ( province && city ) {
